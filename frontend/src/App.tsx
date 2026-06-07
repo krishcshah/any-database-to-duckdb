@@ -94,6 +94,23 @@ function App() {
     setErrorMessage(null);
     setLogs([]);
     
+    // Vercel serverless functions have a strict 4.5 MB payload limit (request + response)
+    const isVercel = !import.meta.env.DEV;
+    if (isVercel) {
+      const maxVercelSize = 4.5 * 1024 * 1024;
+      const totalSize = selectedFiles.reduce((acc, file) => acc + file.size, 0);
+      if (totalSize > maxVercelSize) {
+        setErrorMessage(
+          `Vercel serverless deployments have a strict 4.5 MB upload limit. ` +
+          `Your upload is ${(totalSize / (1024 * 1024)).toFixed(2)} MB. ` +
+          `To convert larger datasets, please run the application locally or via Docker as described in the README.`
+        );
+        setStep('failed');
+        setIsLoading(false);
+        return;
+      }
+    }
+    
     const formData = new FormData();
     selectedFiles.forEach((file) => {
       formData.append('files', file);
