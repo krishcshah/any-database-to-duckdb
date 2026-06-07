@@ -254,7 +254,9 @@ async def convert_database(req: ConvertRequest):
                     "size": os.path.getsize(indiv_db_path)
                 })
         except Exception as e:
+            import traceback
             session_logger.log(f"Error during conversion of {base_name}: {str(e)}")
+            session_logger.log(traceback.format_exc())
             
     # Verify combined database
     if not os.path.exists(combined_db_path) or os.path.getsize(combined_db_path) == 0:

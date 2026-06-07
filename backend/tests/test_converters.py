@@ -239,7 +239,11 @@ def test_xml_ocel2_converter(temp_dir):
     
     db_path = temp_dir / "ocel_xml.duckdb"
     successful = converter.convert(str(db_path), {t: t for t in table_names})
-    assert len(successful) == len(table_names)
+    # successful includes the original table_names PLUS the flat OCEL2 schema tables
+    for t in table_names:
+        assert t in successful, f"Expected {t} in successful tables"
+    for flat in ['events', 'objects', 'event_object', 'object_attribute_history', 'object_relations']:
+        assert flat in successful, f"Expected flat table {flat} in successful tables"
     
     conn = duckdb.connect(str(db_path))
     events = conn.execute("SELECT * FROM event").fetchall()
@@ -294,3 +298,124 @@ def test_combined_merging(temp_dir):
     objects = conn.execute("SELECT ocel_id, ocel_type FROM object ORDER BY ocel_id").fetchall()
     assert objects == [("o1", "Order"), ("o2", "Item")]
     conn.close()
+
+def test_ocel2_flat_schema(temp_dir):
+    # 1. Setup JSON OCEL 2.0
+    json_path = temp_dir / "ocel_flat.json"
+    ocel_data = {
+        "eventTypes": [
+            {"name": "Register", "attributes": [{"name": "cost", "type": "float"}]}
+        ],
+        "objectTypes": [
+            {"name": "Order", "attributes": [{"name": "price", "type": "float"}]}
+        ],
+        "events": [
+            {
+                "id": "e1",
+                "type": "Register",
+                "time": "2026-06-07T10:00:00Z",
+                "attributes": [{"name": "cost", "value": 10.5}],
+                "relationships": [{"objectId": "o1", "qualifier": "order"}]
+            }
+        ],
+        "objects": [
+            {
+                "id": "o1",
+                "type": "Order",
+                "attributes": [{"name": "price", "value": 100.0, "time": "2026-06-07T10:00:00Z"}],
+                "relationships": [{"objectId": "o2", "qualifier": "suborder"}]
+            },
+            {
+                "id": "o2",
+                "type": "Order",
+                "attributes": []
+            }
+        ]
+    }
+    with open(json_path, "w") as f:
+        json.dump(ocel_data, f)
+
+    conv_json = JSONConverter(str(json_path))
+    db_path_json = temp_dir / "flat_json.duckdb"
+    conv_json.convert(str(db_path_json), {"event": "event", "object": "object"})
+
+    conn = duckdb.connect(str(db_path_json))
+    # Check events table
+    evs = conn.execute("SELECT event_id, activity, timestamp_unix, cost FROM events").fetchall()
+    assert len(evs) == 1
+    assert evs[0][0] == "e1"
+    assert evs[0][1] == "Register"
+    assert evs[0][2] == 1780826400  # Unix timestamp for 2026-06-07T10:00:00Z
+    assert float(evs[0][3]) == 10.5
+
+    # Check objects table
+    objs = conn.execute("SELECT obj_id, obj_type, price FROM objects ORDER BY obj_id").fetchall()
+    assert len(objs) == 2
+    assert objs[0][0] == "o1"
+    assert objs[0][1] == "Order"
+    assert float(objs[0][2]) == 100.0
+    assert objs[1][0] == "o2"
+    assert objs[1][1] == "Order"
+    assert objs[1][2] is None
+
+    # Check event_object table
+    e2o = conn.execute("SELECT event_id, obj_id, qualifier FROM event_object").fetchall()
+    assert e2o == [("e1", "o1", "order")]
+
+    # Check object_relations table
+    o2o = conn.execute("SELECT source_obj_id, target_obj_id, qualifier FROM object_relations").fetchall()
+    assert o2o == [("o1", "o2", "suborder")]
+
+    # Check object_attribute_history table
+    hist = conn.execute("SELECT obj_id, timestamp_unix, price FROM object_attribute_history").fetchall()
+    assert len(hist) == 1
+    assert hist[0][0] == "o1"
+    assert hist[0][1] == 1780826400
+    assert float(hist[0][2]) == 100.0
+
+    conn.close()
+
+    # 2. Setup SQLite OCEL 2.0
+    sqlite_path = temp_dir / "ocel_flat.sqlite"
+    conn_sq = sqlite3.connect(str(sqlite_path))
+    conn_sq.execute("CREATE TABLE event (ocel_id TEXT PRIMARY KEY, ocel_type TEXT)")
+    conn_sq.execute("CREATE TABLE object (ocel_id TEXT PRIMARY KEY, ocel_type TEXT)")
+    conn_sq.execute("CREATE TABLE event_object (ocel_event_id TEXT, ocel_object_id TEXT, ocel_qualifier TEXT)")
+    conn_sq.execute("CREATE TABLE object_object (ocel_source_id TEXT, ocel_target_id TEXT, ocel_qualifier TEXT)")
+    conn_sq.execute("CREATE TABLE event_map_type (ocel_type TEXT, ocel_type_map TEXT)")
+    conn_sq.execute("CREATE TABLE object_map_type (ocel_type TEXT, ocel_type_map TEXT)")
+    conn_sq.execute("CREATE TABLE event_register (ocel_id TEXT PRIMARY KEY, ocel_time TEXT, cost REAL)")
+    conn_sq.execute("CREATE TABLE object_order (ocel_id TEXT PRIMARY KEY, ocel_time TEXT, price REAL)")
+    
+    conn_sq.execute("INSERT INTO event VALUES ('e1', 'Register')")
+    conn_sq.execute("INSERT INTO object VALUES ('o1', 'Order')")
+    conn_sq.execute("INSERT INTO event_object VALUES ('e1', 'o1', 'order')")
+    conn_sq.execute("INSERT INTO event_map_type VALUES ('Register', 'register')")
+    conn_sq.execute("INSERT INTO object_map_type VALUES ('Order', 'order')")
+    conn_sq.execute("INSERT INTO event_register VALUES ('e1', '2026-06-07T10:00:00Z', 10.5)")
+    conn_sq.execute("INSERT INTO object_order VALUES ('o1', '2026-06-07T10:00:00Z', 100.0)")
+    
+    conn_sq.commit()
+    conn_sq.close()
+
+    conv_sqlite = SQLiteConverter(str(sqlite_path))
+    db_path_sqlite = temp_dir / "flat_sqlite.duckdb"
+    conv_sqlite.convert(str(db_path_sqlite), {"event": "event", "object": "object"})
+
+    conn = duckdb.connect(str(db_path_sqlite))
+    # Check flat tables
+    evs = conn.execute("SELECT event_id, activity, timestamp_unix, cost FROM events").fetchall()
+    assert len(evs) == 1
+    assert evs[0][0] == "e1"
+    assert evs[0][1] == "register"
+    assert evs[0][2] == 1780826400
+    assert float(evs[0][3]) == 10.5
+
+    objs = conn.execute("SELECT obj_id, obj_type, price FROM objects").fetchall()
+    assert len(objs) == 1
+    assert objs[0][0] == "o1"
+    assert objs[0][1] == "order"
+    assert float(objs[0][2]) == 100.0
+
+    conn.close()
+

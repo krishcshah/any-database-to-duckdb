@@ -468,11 +468,13 @@ class XMLConverter(BaseConverter):
 
     def convert(self, db_path: str, table_mappings: Dict[str, str]) -> List[str]:
         if self._is_ocel2():
+            print(f"[XML OCEL2] Starting OCEL2 conversion for {self.file_path}")
+            event_attrs_map, object_attrs_map, events, objects, event_objects, object_objects = self._parse_xml_ocel2()
+            print(f"[XML OCEL2] Parsed: {len(events)} events, {len(objects)} objects, {len(event_objects)} event-obj links, {len(object_objects)} obj-obj links")
+
+            conn_duck = duckdb.connect(db_path)
             try:
-                event_attrs_map, object_attrs_map, events, objects, event_objects, object_objects = self._parse_xml_ocel2()
-                conn_duck = duckdb.connect(db_path)
-                
-                # First, build flat tables
+                print("[XML OCEL2] Building flat tables...")
                 self._build_flat_ocel_tables(
                     conn_duck,
                     events,
@@ -480,8 +482,7 @@ class XMLConverter(BaseConverter):
                     event_objects,
                     object_objects
                 )
-                
-                # Then build relational mapped tables
+                print("[XML OCEL2] Flat tables done. Building relational tables...")
                 self._build_ocel_tables_from_parsed_data(
                     conn_duck,
                     event_attrs_map,
@@ -492,20 +493,39 @@ class XMLConverter(BaseConverter):
                     object_objects,
                     table_mappings
                 )
-                
+                print("[XML OCEL2] Relational tables done.")
+
                 successful_tables = []
                 for original_name, new_name in table_mappings.items():
-                    table_exists = conn_duck.execute(f"SELECT 1 FROM information_schema.tables WHERE table_name = '{new_name}'").fetchone()
+                    table_exists = conn_duck.execute(
+                        f"SELECT 1 FROM information_schema.tables WHERE table_name = '{new_name}'"
+                    ).fetchone()
                     if table_exists:
                         successful_tables.append(original_name)
-                        
+
+                # Always include flat schema table names in the result
+                flat_names = ['events', 'objects', 'event_object', 'object_attribute_history', 'object_relations']
+                for flat_name in flat_names:
+                    table_exists = conn_duck.execute(
+                        f"SELECT 1 FROM information_schema.tables WHERE table_name = '{flat_name}'"
+                    ).fetchone()
+                    if table_exists and flat_name not in successful_tables:
+                        row_count = conn_duck.execute(f'SELECT COUNT(*) FROM "{flat_name}"').fetchone()[0]
+                        if row_count > 0:
+                            successful_tables.append(flat_name)
+
+                print(f"[XML OCEL2] Done. Successful tables: {successful_tables}")
                 conn_duck.close()
                 return successful_tables
             except Exception as e:
                 import traceback
-                print(f"Error during OCEL2 XML conversion: {e}")
-                traceback.print_exc()
-                return []
+                tb = traceback.format_exc()
+                print(f"[XML OCEL2] ERROR: {e}\n{tb}")
+                try:
+                    conn_duck.close()
+                except Exception:
+                    pass
+                raise RuntimeError(f"OCEL2 XML conversion failed: {e}\n{tb}") from e
         else:
             self._parse_xml()
             conn_duck = duckdb.connect(db_path)
