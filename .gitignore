@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+ENV/
+.pytest_cache/
+backend/temp_storage/
+
+# Node
+node_modules/
+dist/
+.eslintcache
+
+# Databases & Archives
+# (Note: we keep examples/ folder files by not ignoring them specifically, but we ignore runtime files)
+backend/temp_storage/**/*.duckdb
+backend/temp_storage/**/*.sqlite
+backend/temp_storage/**/*.zip
+backend/temp_storage/**/*.log
+*.log
+
+# IDE & System
+.idea/
+.vscode/
+.gemini/
+.DS_Store
+Thumbs.db
