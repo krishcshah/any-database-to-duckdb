@@ -37,6 +37,39 @@ class XMLConverter(BaseConverter):
         else:
             return "VARCHAR"
 
+    def _normalize_timestamp(self, ts: str) -> str:
+        """Normalize any timestamp string to ISO 8601 format.
+        Handles ISO format directly, and also human-readable formats like
+        'Thu Jan 01 1970 01:00:00 GMT+0100 (Central European Standard Time)'.
+        Returns the original string if it cannot be parsed.
+        """
+        if not ts:
+            return ts
+        # Already ISO-like
+        if 'T' in ts and ts[0].isdigit():
+            return ts
+        # Try python email.utils or dateutil for flexible parsing
+        from datetime import timezone
+        try:
+            from email.utils import parsedate_to_datetime
+            # Strip parenthetical timezone names like '(Central European Standard Time)'
+            import re as _re
+            clean_ts = _re.sub(r'\s*\(.*?\)\s*$', '', ts).strip()
+            # Replace 'GMT+0100' with '+0100' for parsedate_to_datetime
+            clean_ts = _re.sub(r'GMT([+-]\d{4})', r'\1', clean_ts)
+            dt = parsedate_to_datetime(clean_ts)
+            return dt.astimezone(timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z'
+        except Exception:
+            pass
+        # Fallback: try dateutil if available
+        try:
+            from dateutil import parser as _duparser
+            dt = _duparser.parse(ts)
+            return dt.astimezone(timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z'
+        except Exception:
+            pass
+        return ts
+
     def _parse_xml_ocel2(self) -> Tuple[Dict[str, Dict[str, str]], Dict[str, Dict[str, str]], List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]]]:
         tree = ET.parse(self.file_path)
         root = tree.getroot()
@@ -91,7 +124,7 @@ class XMLConverter(BaseConverter):
                         event_entry = {
                             "id": ev_id,
                             "type": ev_type,
-                            "time": ev_time,
+                            "time": self._normalize_timestamp(ev_time),
                             "attributes": []
                         }
                         
@@ -101,7 +134,8 @@ class XMLConverter(BaseConverter):
                         if attrs_elem is not None:
                             for attr in attrs_elem:
                                 attr_name = attr.attrib.get('name')
-                                attr_val = attr.text.strip() if attr.text else ""
+                                # value may be text content or a 'value' attribute
+                                attr_val = attr.text.strip() if attr.text and attr.text.strip() else attr.attrib.get('value', '')
                                 if attr_name:
                                     event_entry["attributes"].append({"name": attr_name, "value": attr_val})
                                     
@@ -142,12 +176,13 @@ class XMLConverter(BaseConverter):
                             for attr in attrs_elem:
                                 attr_name = attr.attrib.get('name')
                                 attr_time = attr.attrib.get('time')
-                                attr_val = attr.text.strip() if attr.text else ""
+                                # value may be text content or a 'value' attribute
+                                attr_val = attr.text.strip() if attr.text and attr.text.strip() else attr.attrib.get('value', '')
                                 if attr_name:
                                     object_entry["attributes"].append({
                                         "name": attr_name,
                                         "value": attr_val,
-                                        "time": attr_time or "1970-01-01T00:00:00Z"
+                                        "time": self._normalize_timestamp(attr_time) or "1970-01-01T00:00:00Z"
                                     })
                                     
                         objs_elem = obj.find('{*}objects')
@@ -437,6 +472,16 @@ class XMLConverter(BaseConverter):
                 event_attrs_map, object_attrs_map, events, objects, event_objects, object_objects = self._parse_xml_ocel2()
                 conn_duck = duckdb.connect(db_path)
                 
+                # First, build flat tables
+                self._build_flat_ocel_tables(
+                    conn_duck,
+                    events,
+                    objects,
+                    event_objects,
+                    object_objects
+                )
+                
+                # Then build relational mapped tables
                 self._build_ocel_tables_from_parsed_data(
                     conn_duck,
                     event_attrs_map,
@@ -457,7 +502,9 @@ class XMLConverter(BaseConverter):
                 conn_duck.close()
                 return successful_tables
             except Exception as e:
+                import traceback
                 print(f"Error during OCEL2 XML conversion: {e}")
+                traceback.print_exc()
                 return []
         else:
             self._parse_xml()
