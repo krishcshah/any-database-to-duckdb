@@ -5,7 +5,11 @@ import time
 import zipfile
 from typing import List, Dict, Any, Tuple
 
-TEMP_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "temp_storage"))
+# Use /tmp on Vercel since the filesystem is read-only elsewhere
+if os.environ.get("VERCEL"):
+    TEMP_DIR = "/tmp/temp_storage"
+else:
+    TEMP_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "temp_storage"))
 
 def init_temp_storage():
     """Ensure the base temp directory exists."""
