@@ -76,7 +76,12 @@ class SQLiteConverter(BaseConverter):
             
             for original_name, new_name in table_mappings.items():
                 try:
-                    conn_duck.execute(f'CREATE TABLE "{new_name}" AS SELECT * FROM sqlite_db."{original_name}";')
+                    # Check if table exists in DuckDB
+                    table_exists = conn_duck.execute(f"SELECT 1 FROM information_schema.tables WHERE table_name = '{new_name}'").fetchone()
+                    if table_exists:
+                        conn_duck.execute(f'INSERT INTO "{new_name}" SELECT * FROM sqlite_db."{original_name}";')
+                    else:
+                        conn_duck.execute(f'CREATE TABLE "{new_name}" AS SELECT * FROM sqlite_db."{original_name}";')
                     successful_tables.append(original_name)
                 except Exception as table_err:
                     print(f"Error copying table {original_name} natively, will try fallback: {table_err}")
@@ -89,7 +94,8 @@ class SQLiteConverter(BaseConverter):
                 if original_name in successful_tables:
                     continue
                 try:
-                    first = True
+                    table_exists = conn_duck.execute(f"SELECT 1 FROM information_schema.tables WHERE table_name = '{new_name}'").fetchone()
+                    first = not table_exists
                     chunksize = 50000
                     # Read and insert chunk by chunk
                     for chunk in pd.read_sql_query(f'SELECT * FROM "{original_name}"', conn_sqlite, chunksize=chunksize):
