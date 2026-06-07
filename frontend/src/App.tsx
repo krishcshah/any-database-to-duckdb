@@ -97,8 +97,9 @@ function App() {
     setLogs([]);
     
     // Vercel serverless functions have a strict 4.5 MB payload limit (request + response)
-    const isVercel = !import.meta.env.DEV;
-    if (isVercel) {
+    // Only enforce this if we are running in production on Vercel AND API_BASE is relative (hosted on Vercel too)
+    const isHostedOnVercel = !import.meta.env.DEV && API_BASE === '';
+    if (isHostedOnVercel) {
       const maxVercelSize = 4.5 * 1024 * 1024;
       const totalSize = selectedFiles.reduce((acc, file) => acc + file.size, 0);
       if (totalSize > maxVercelSize) {
