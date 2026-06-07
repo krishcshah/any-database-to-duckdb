@@ -7,9 +7,12 @@ echo "Starting application on port $PORT..."
 # Replace ${PORT} in the nginx configuration template
 sed "s/\${PORT}/$PORT/g" /etc/nginx/nginx.conf.template > /etc/nginx/nginx.conf
 
-# Start FastAPI backend in the background
-echo "Starting FastAPI backend on 127.0.0.1:8000..."
-python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 &
+# Set PYTHONPATH to ensure python finds the app package
+export PYTHONPATH=$PYTHONPATH:/app
+
+# Start FastAPI backend in the background binding to 0.0.0.0
+echo "Starting FastAPI backend on 0.0.0.0:8000..."
+python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 &
 BACKEND_PID=$!
 
 # Start Nginx in the background
