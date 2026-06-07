@@ -57,9 +57,23 @@ interface ConversionResult {
   }>;
 }
 
-const API_BASE = import.meta.env.VITE_API_URL !== undefined 
+let API_BASE = import.meta.env.VITE_API_URL !== undefined 
   ? import.meta.env.VITE_API_URL 
   : (import.meta.env.DEV ? 'http://localhost:8000' : '');
+
+if (API_BASE) {
+  // Ensure protocol is present (avoid relative routing fallback on static Vercel routes)
+  if (!/^https?:\/\//i.test(API_BASE)) {
+    API_BASE = API_BASE.includes('localhost') || API_BASE.includes('127.0.0.1')
+      ? `http://${API_BASE}`
+      : `https://${API_BASE}`;
+  }
+  // Strip trailing slash to prevent double slash paths (e.g., //api/convert)
+  if (API_BASE.endsWith('/')) {
+    API_BASE = API_BASE.slice(0, -1);
+  }
+}
+
 
 function App() {
   const [step, setStep] = useState<'upload' | 'config' | 'processing' | 'success' | 'failed'>('upload');

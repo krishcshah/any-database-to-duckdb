@@ -20,6 +20,9 @@ http {
 
         # Reverse Proxy to Python FastAPI Backend
         location /api {
+            # Normalize and merge slashes in proxy URL
+            rewrite ^/api/(.*)$ /api/$1 break;
+
             proxy_pass http://127.0.0.1:8000;
             proxy_set_header Host $host;
             proxy_set_header X-Real-IP $remote_addr;
