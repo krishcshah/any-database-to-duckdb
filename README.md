@@ -13,7 +13,7 @@ graph TD
     A[Client UI] -->|1. Upload Files / ZIP| B[FastAPI Backend]
     B -->|2. Extract & Scan Schema| C[Converters Engine]
     C -->|3. Return Tables & Previews| A
-    A -->|4. Configure Renames & Run| B
+    A -->|4. Configure & Run| B
     B -->|5. Compile to DuckDB| D[DuckDB Engine]
     D -->|6. Save .duckdb File| E[Session Download Dir]
     A -->|7. Pull DB File| E
