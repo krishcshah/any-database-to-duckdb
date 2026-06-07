@@ -75,26 +75,27 @@ class SQLiteConverter(BaseConverter):
             conn_duck.execute(f"ATTACH '{self.file_path}' AS sqlite_db (TYPE SQLITE);")
             
             for original_name, new_name in table_mappings.items():
-                try:
-                    # Check if table exists in DuckDB
-                    table_exists = conn_duck.execute(f"SELECT 1 FROM information_schema.tables WHERE table_name = '{new_name}'").fetchone()
-                    if table_exists:
-                        conn_duck.execute(f'INSERT INTO "{new_name}" SELECT * FROM sqlite_db."{original_name}";')
-                    else:
-                        conn_duck.execute(f'CREATE TABLE "{new_name}" AS SELECT * FROM sqlite_db."{original_name}";')
-                    successful_tables.append(original_name)
-                except Exception as table_err:
-                    print(f"Error copying table {original_name} natively, will try fallback: {table_err}")
+                # Check if table exists in DuckDB (using current_database() to ignore tables in attached databases)
+                table_exists = conn_duck.execute(f"SELECT 1 FROM information_schema.tables WHERE table_name = '{new_name}' AND table_catalog = current_database()").fetchone()
+                if table_exists:
+                    conn_duck.execute(f'INSERT INTO "{new_name}" SELECT * FROM sqlite_db."{original_name}";')
+                else:
+                    conn_duck.execute(f'CREATE TABLE "{new_name}" AS SELECT * FROM sqlite_db."{original_name}";')
+                successful_tables.append(original_name)
             
             conn_duck.execute("DETACH sqlite_db;")
         except Exception as native_err:
             print(f"Native SQLite scanner not available or failed: {native_err}. Falling back to Pandas streaming.")
+            try:
+                conn_duck.execute("DETACH sqlite_db;")
+            except Exception:
+                pass
             # Fallback to pandas streaming
             for original_name, new_name in table_mappings.items():
                 if original_name in successful_tables:
                     continue
                 try:
-                    table_exists = conn_duck.execute(f"SELECT 1 FROM information_schema.tables WHERE table_name = '{new_name}'").fetchone()
+                    table_exists = conn_duck.execute(f"SELECT 1 FROM information_schema.tables WHERE table_name = '{new_name}' AND table_catalog = current_database()").fetchone()
                     first = not table_exists
                     chunksize = 50000
                     # Read and insert chunk by chunk
